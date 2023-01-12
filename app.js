@@ -54,12 +54,73 @@ const convertDistrictDbObjectToResponseObject = (dbObject) => {
 //login api
 app.post("/login/", async (request, response) => {
   const { username, password } = request.body;
-  if (username === undefined) {
+  const userQuery = `
+  select * from user where username ='${username}';`;
+  const dbUser = await database.get(userQuery);
+  if (dbUser === undefined) {
+    response.status(400);
     response.send("Invalid user");
+  } else {
+    const isPassValid = await bcrypt.compare(password, dbUser.password);
+    if (isPassValid !== true) {
+      response.status(400);
+      response.send("Invalid password");
+    } else {
+      const payload = {
+        username: username,
+      };
+      const jwtToken = await jwt.sign(payload, "MY_SECRET_KEY");
+      response.send({ jwtToken });
+      console.log(jwtToken);
+    }
   }
 });
 
-app.get("/states/", async (request, response) => {
+// // authenticationToken api
+// const authenticationToken = (request, response, next) => {
+//   let jwtToken;
+//   const authHeader = request.header["authorization"];
+//   if (authHeader !== undefined) {
+//     jwtToken = authHeader.split()[1];
+//   }
+//   if (jwtToken === undefined) {
+//     response.status(401);
+//     response.send("Invalid JWT Token");
+//   } else {
+//     jwt.verify(jwtToken, "MY_SECRET_KEY", async (error, payload) => {
+//       if (error) {
+//         response.status(401);
+//         response.send("Invalid JWT Token");
+//       } else {
+//         request.username = payload.username;
+//         next();
+//       }
+//     });
+//   }
+// };
+
+const authenticationToken = (request, response, next) => {
+  let jwtToken;
+  const authHeader = request.headers["authorization"];
+  if (authHeader !== undefined) {
+    jwtToken = authHeader.split(" ")[1];
+  }
+  if (jwtToken === undefined) {
+    response.status(401);
+    response.send("Invalid JWT Token");
+  } else {
+    jwt.verify(jwtToken, "MY_SECRET_KEY", async (error, payload) => {
+      if (error) {
+        response.status(401);
+        response.send("Invalid JWT Token");
+      } else {
+        next();
+      }
+    });
+  }
+};
+
+app.get("/states/", authenticationToken, async (request, response) => {
   const getStatesQuery = `
     SELECT
       *
@@ -73,7 +134,7 @@ app.get("/states/", async (request, response) => {
   );
 });
 
-app.get("/states/:stateId/", async (request, response) => {
+app.get("/states/:stateId/", authenticationToken, async (request, response) => {
   const { stateId } = request.params;
   const getStateQuery = `
     SELECT 
@@ -86,20 +147,24 @@ app.get("/states/:stateId/", async (request, response) => {
   response.send(convertStateDbObjectToResponseObject(state));
 });
 
-app.get("/districts/:districtId/", async (request, response) => {
-  const { districtId } = request.params;
-  const getDistrictsQuery = `
+app.get(
+  "/districts/:districtId/",
+  authenticationToken,
+  async (request, response) => {
+    const { districtId } = request.params;
+    const getDistrictsQuery = `
     SELECT
       *
     FROM
      district
     WHERE
       district_id = ${districtId};`;
-  const district = await database.get(getDistrictsQuery);
-  response.send(convertDistrictDbObjectToResponseObject(district));
-});
+    const district = await database.get(getDistrictsQuery);
+    response.send(convertDistrictDbObjectToResponseObject(district));
+  }
+);
 
-app.post("/districts/", async (request, response) => {
+app.post("/districts/", authenticationToken, async (request, response) => {
   const { stateId, districtName, cases, cured, active, deaths } = request.body;
   const postDistrictQuery = `
   INSERT INTO
@@ -110,22 +175,36 @@ app.post("/districts/", async (request, response) => {
   response.send("District Successfully Added");
 });
 
-app.delete("/districts/:districtId/", async (request, response) => {
-  const { districtId } = request.params;
-  const deleteDistrictQuery = `
+app.delete(
+  "/districts/:districtId/",
+  authenticationToken,
+  async (request, response) => {
+    const { districtId } = request.params;
+    const deleteDistrictQuery = `
   DELETE FROM
     district
   WHERE
     district_id = ${districtId} 
   `;
-  await database.run(deleteDistrictQuery);
-  response.send("District Removed");
-});
+    await database.run(deleteDistrictQuery);
+    response.send("District Removed");
+  }
+);
 
-app.put("/districts/:districtId/", async (request, response) => {
-  const { districtId } = request.params;
-  const { districtName, stateId, cases, cured, active, deaths } = request.body;
-  const updateDistrictQuery = `
+app.put(
+  "/districts/:districtId/",
+  authenticationToken,
+  async (request, response) => {
+    const { districtId } = request.params;
+    const {
+      districtName,
+      stateId,
+      cases,
+      cured,
+      active,
+      deaths,
+    } = request.body;
+    const updateDistrictQuery = `
   UPDATE
     district
   SET
@@ -139,13 +218,17 @@ app.put("/districts/:districtId/", async (request, response) => {
     district_id = ${districtId};
   `;
 
-  await database.run(updateDistrictQuery);
-  response.send("District Details Updated");
-});
+    await database.run(updateDistrictQuery);
+    response.send("District Details Updated");
+  }
+);
 
-app.get("/states/:stateId/stats/", async (request, response) => {
-  const { stateId } = request.params;
-  const getStateStatsQuery = `
+app.get(
+  "/states/:stateId/stats/",
+  authenticationToken,
+  async (request, response) => {
+    const { stateId } = request.params;
+    const getStateStatsQuery = `
     SELECT
       SUM(cases),
       SUM(cured),
@@ -155,18 +238,22 @@ app.get("/states/:stateId/stats/", async (request, response) => {
       district
     WHERE
       state_id=${stateId};`;
-  const stats = await database.get(getStateStatsQuery);
-  response.send({
-    totalCases: stats["SUM(cases)"],
-    totalCured: stats["SUM(cured)"],
-    totalActive: stats["SUM(active)"],
-    totalDeaths: stats["SUM(deaths)"],
-  });
-});
+    const stats = await database.get(getStateStatsQuery);
+    response.send({
+      totalCases: stats["SUM(cases)"],
+      totalCured: stats["SUM(cured)"],
+      totalActive: stats["SUM(active)"],
+      totalDeaths: stats["SUM(deaths)"],
+    });
+  }
+);
 
-app.get("/districts/:districtId/details/", async (request, response) => {
-  const { districtId } = request.params;
-  const getStateNameQuery = `
+app.get(
+  "/districts/:districtId/details/",
+  authenticationToken,
+  async (request, response) => {
+    const { districtId } = request.params;
+    const getStateNameQuery = `
     SELECT
       state_name
     FROM
@@ -175,8 +262,9 @@ app.get("/districts/:districtId/details/", async (request, response) => {
       state
     WHERE 
       district_id=${districtId};`;
-  const state = await database.get(getStateNameQuery);
-  response.send({ stateName: state.state_name });
-});
+    const state = await database.get(getStateNameQuery);
+    response.send({ stateName: state.state_name });
+  }
+);
 
 module.exports = app;
